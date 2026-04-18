@@ -39,7 +39,9 @@ async def lifespan(app: FastAPI):
     kg_builder = KnowledgeGraphBuilder(llm=llm)
     
     # Init RAG pieces
-    hybrid_retriever = HybridRetriever(vector_store=vector_store, llm=llm)
+    from src.retrieval.llm_reranker import LLMReranker
+    llm_reranker = LLMReranker(llm=llm)
+    hybrid_retriever = HybridRetriever(vector_store=vector_store, llm=llm, reranker=llm_reranker)
     response_generator = ResponseGenerator(llm=llm)
     
     yield

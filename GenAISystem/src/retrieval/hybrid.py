@@ -13,9 +13,10 @@ logger = get_logger(__name__)
 class HybridRetriever:
     """Retrieves and merges contexts from both Vector DB and Knowledge Graph."""
 
-    def __init__(self, vector_store: Any, llm: Any):
+    def __init__(self, vector_store: Any, llm: Any, reranker: Any = None):
         self.vector_store = vector_store
         self.llm = llm
+        self.reranker = reranker
         self._graph = None
 
     def _get_graph(self):
@@ -67,16 +68,18 @@ class HybridRetriever:
             except Exception as e:
                 logger.error(f"Graph retrieval failed: {e}")
 
-        # 3. Reciprocal Rank Fusion / De-duplication (simplified here)
+        # 3. Reciprocal Rank Fusion / De-duplication
         all_docs = vector_docs + graph_docs
         
-        # In a real system, you'd apply a cross-encoder reranker here.
-        # For now, just return top N unique texts.
         seen = set()
         unique_docs = []
         for d in all_docs:
             if d.page_content not in seen:
                 seen.add(d.page_content)
                 unique_docs.append(d)
+
+        # Apply reranker if configured
+        if self.reranker and unique_docs:
+            return self.reranker.rerank(query, unique_docs, top_k=top_k)
 
         return unique_docs[:top_k]
