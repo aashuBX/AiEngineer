@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mcp-server"
+version = "0.1.0"
+description = "Centralized Model Context Protocol (MCP) server exposing tools to AI Agents"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # MCP SDK
+    "mcp>=1.0.0",
+    # API Framework (FastAPI serving as the unified HTTP gateway)
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+    "python-multipart>=0.0.9",
+    "sse-starlette>=2.1.0",
+    # Config & Validation
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.2.0",
+    "python-dotenv>=1.0.0",
+    # Tool external dependencies
+    "httpx>=0.27.0",       # For Web Search / API integrations
+    "beautifulsoup4>=4.12.0", # For web scraping
+    "duckduckgo-search>=6.0.0",
+    "sqlalchemy>=2.0.0",   # For database tool
+    "psycopg2-binary>=2.9.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

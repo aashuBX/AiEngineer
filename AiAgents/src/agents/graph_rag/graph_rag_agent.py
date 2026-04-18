@@ -1,0 +1,113 @@
+"""
+GraphRAG Agent — interfaces with GenAISystem's hybrid retrieval pipeline
+(vector search + knowledge graph) to answer deep domain queries with citations.
+"""
+
+from typing import Any
+
+import httpx
+
+from src.agents.base_agent import BaseAgent
+from src.config.settings import settings
+from src.models.schemas import AgentConfig
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+_GRAPH_RAG_SYSTEM_PROMPT = """You are a Knowledge Synthesis Agent with access to a rich knowledge base.
+
+You have been given retrieved context from both a vector database and a knowledge graph.
+Your job is to:
+1. Synthesize the retrieved context to answer the user's question accurately
+2. Cite your sources using [1], [2], etc. format
+3. If the context doesn't contain the answer, say so explicitly — never hallucinate
+4. Structure your response clearly with key points highlighted
+
+Always prioritize accuracy over confidence. If uncertain, express that uncertainty.
+"""
+
+
+class GraphRagAgent(BaseAgent):
+    """Queries GenAISystem for knowledge-graph-enriched RAG responses."""
+
+    def __init__(self):
+        super().__init__(
+            config=AgentConfig(
+                name="GraphRagAgent",
+                description="Answers domain queries using hybrid vector + graph retrieval",
+                temperature=0.1,
+            )
+        )
+        self._genai_url = settings.genai_system_url
+
+    @property
+    def system_prompt(self) -> str:
+        return _GRAPH_RAG_SYSTEM_PROMPT
+
+    async def _query_genai_system(self, query: str, strategy: str = "hybrid") -> dict:
+        """Call GenAISystem RAG API to retrieve context."""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self._genai_url}/query",
+                    json={"query": query, "strategy": strategy, "top_k": 5},
+                )
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPError as e:
+            logger.error(f"GenAISystem request failed: {e}")
+            return {"documents": [], "citations": []}
+
+    async def process(self, state: dict[str, Any]) -> dict[str, Any]:
+        messages = state.get("messages", [])
+        user_query = ""
+        for msg in reversed(messages):
+            if getattr(msg, "type", "") == "human":
+                user_query = msg.content
+                break
+
+        if not user_query:
+            return {**state, "task_status": "error", "error": "No user query found"}
+
+        logger.info(f"GraphRagAgent: querying GenAISystem for: {user_query!r}")
+
+        # Retrieve context from GenAISystem
+        retrieval = await self._query_genai_system(user_query)
+        documents = retrieval.get("documents", [])
+        citations = retrieval.get("citations", [])
+
+        # Build context string
+        context_parts = []
+        for i, doc in enumerate(documents, 1):
+            content = doc.get("content", doc) if isinstance(doc, dict) else str(doc)
+            context_parts.append(f"[{i}] {content}")
+        context = "\n\n".join(context_parts) if context_parts else "No relevant context found."
+
+        # Augment prompt with context
+        from src.config.llm_providers import get_default_llm
+        llm = get_default_llm()
+        augmented_query = (
+            f"Context from knowledge base:\n{context}\n\n"
+            f"User question: {user_query}"
+        )
+        prompt_msgs = self.build_messages(augmented_query, history=messages[:-1])
+
+        try:
+            response = await llm.ainvoke(prompt_msgs)
+            answer = response.content
+
+            from langchain_core.messages import AIMessage
+            return {
+                **state,
+                "messages": [AIMessage(content=answer)],
+                "task_status": "done",
+                "current_agent": "graph_rag",
+                "metadata": {
+                    **state.get("metadata", {}),
+                    "citations": citations,
+                    "retrieved_docs": len(documents),
+                },
+            }
+        except Exception as e:
+            logger.error(f"GraphRagAgent generation failed: {e}")
+            return {**state, "task_status": "error", "error": str(e)}
