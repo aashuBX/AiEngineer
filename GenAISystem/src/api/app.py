@@ -40,8 +40,16 @@ async def lifespan(app: FastAPI):
     
     # Init RAG pieces
     from src.retrieval.llm_reranker import LLMReranker
+    from src.retrieval.reranker import CrossEncoderReranker
+    
     llm_reranker = LLMReranker(llm=llm)
-    hybrid_retriever = HybridRetriever(vector_store=vector_store, llm=llm, reranker=llm_reranker)
+    cross_encoder = CrossEncoderReranker()
+    hybrid_retriever = HybridRetriever(
+        vector_store=vector_store,
+        llm=llm,
+        llm_reranker=llm_reranker,
+        cross_encoder=cross_encoder
+    )
     response_generator = ResponseGenerator(llm=llm)
     
     yield
@@ -54,6 +62,7 @@ app = FastAPI(title="GenAISystem API", lifespan=lifespan)
 class QueryRequest(BaseModel):
     query: str
     strategy: str = "hybrid" # hybrid, vector, graph
+    rerank_strategy: str = "auto" # "auto", "none", "cross_encoder", "llm_reranker"
     top_k: int = 5
 
 
@@ -70,7 +79,11 @@ async def retrieve_and_generate(req: QueryRequest):
     """
     try:
         # 1. Retrieve
-        docs = hybrid_retriever.async_retrieve(req.query, top_k=req.top_k)
+        docs = hybrid_retriever.async_retrieve(
+            req.query, 
+            top_k=req.top_k, 
+            rerank_strategy=req.rerank_strategy
+        )
         
         # Format docs for the orchestration Agent (GraphRagAgent)
         formatted_docs = [

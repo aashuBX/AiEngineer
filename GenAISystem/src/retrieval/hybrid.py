@@ -13,10 +13,11 @@ logger = get_logger(__name__)
 class HybridRetriever:
     """Retrieves and merges contexts from both Vector DB and Knowledge Graph."""
 
-    def __init__(self, vector_store: Any, llm: Any, reranker: Any = None):
+    def __init__(self, vector_store: Any, llm: Any, llm_reranker: Any = None, cross_encoder: Any = None):
         self.vector_store = vector_store
         self.llm = llm
-        self.reranker = reranker
+        self.llm_reranker = llm_reranker
+        self.cross_encoder = cross_encoder
         self._graph = None
 
     def _get_graph(self):
@@ -33,9 +34,9 @@ class HybridRetriever:
                 logger.warning(f"Neo4j unavailable for retrieval: {e}")
         return self._graph
 
-    def async_retrieve(self, query: str, top_k: int = 5) -> list[Document]:
+    def async_retrieve(self, query: str, top_k: int = 5, rerank_strategy: str = "auto") -> list[Document]:
         """Perform unified retrieval sequentially (could be async in prod)."""
-        logger.info(f"Hybrid retrieval for query: {query}")
+        logger.info(f"Hybrid retrieval for query: {query} (Strategy: {rerank_strategy})")
         
         # 1. Vector Search
         vector_docs = []
@@ -78,8 +79,21 @@ class HybridRetriever:
                 seen.add(d.page_content)
                 unique_docs.append(d)
 
-        # Apply reranker if configured
-        if self.reranker and unique_docs:
-            return self.reranker.rerank(query, unique_docs, top_k=top_k)
+        # Determine Routing Strategy
+        if rerank_strategy == "auto":
+            query_lower = query.lower()
+            complex_keywords = ["compare", "difference", "analyze", "why", "summarize", "pros and cons", "evaluate", "reason"]
+            if any(k in query_lower for k in complex_keywords) or len(query.split()) > 15:
+                rerank_strategy = "llm_reranker"
+            else:
+                rerank_strategy = "cross_encoder"
+                
+        # Apply reranker based on strategy
+        if rerank_strategy == "llm_reranker" and self.llm_reranker and unique_docs:
+            logger.info("Routing to LLM Reranker")
+            return self.llm_reranker.rerank(query, unique_docs, top_k=top_k)
+        elif rerank_strategy == "cross_encoder" and self.cross_encoder and unique_docs:
+            logger.info("Routing to Cross-Encoder")
+            return self.cross_encoder.rerank(query, unique_docs, top_k=top_k)
 
         return unique_docs[:top_k]
