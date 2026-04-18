@@ -74,7 +74,7 @@ graph TB
 | **MCP SDK** | `mcp` (FastMCP) | Model Context Protocol server/client |
 | **MCP Adapters** | `langchain-mcp-adapters` | Bridge MCP tools into LangGraph |
 | **A2A Protocol** | `a2a` | Agent-to-Agent communication |
-| **LLM Providers** | OpenAI, Groq, Google Gemini, Ollama | Multi-provider LLM support |
+| **LLM Providers** | OpenAI, Anthropic, Groq, Google Gemini, Ollama | Multi-provider LLM support |
 | **Vector Databases** | FAISS, Qdrant, ChromaDB, Pinecone | Semantic search |
 | **Knowledge Graph** | Neo4j + `neo4j-graphrag` | GraphRAG, entity relationships |
 | **Embeddings** | `sentence-transformers`, OpenAI | Dense vector embeddings |
@@ -112,7 +112,7 @@ AiEngineer/
     │   ├── config/
     │   │   ├── __init__.py
     │   │   ├── settings.py              # Pydantic Settings (env vars, model configs)
-    │   │   └── llm_providers.py         # Multi-provider LLM factory (OpenAI, Groq, Gemini, Ollama)
+    │   │   └── llm_providers.py         # Multi-provider LLM factory (OpenAI, Anthropic, Groq, Gemini, Ollama)
     │   │
     │   ├── models/
     │   │   ├── __init__.py
@@ -160,9 +160,7 @@ AiEngineer/
     │   │
     │   ├── a2a/
     │   │   ├── __init__.py
-    │   │   ├── a2a_client.py            # A2A client for discovering & calling remote agents
-    │   │   ├── a2a_server.py            # A2A server to expose agents for external consumption
-    │   │   └── agent_card.py            # Agent Card definitions (capabilities, skills)
+    │   │   └── a2a_client.py            # A2A client for discovering & calling remote agents
     │   │
     │   ├── memory/
     │   │   ├── __init__.py
@@ -218,7 +216,7 @@ AiEngineer/
 #### Phase 1: Foundation & Configuration
 
 ##### [NEW] [pyproject.toml](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/pyproject.toml)
-- Project metadata, dependencies: `langgraph`, `langchain`, `langchain-openai`, `langchain-groq`, `langchain-google-genai`, `langchain-mcp-adapters`, `mcp`, `a2a`, `pydantic-settings`, `python-dotenv`
+- Project metadata, dependencies: `langgraph`, `langchain`, `langchain-openai`, `langchain-anthropic`, `langchain-groq`, `langchain-google-genai`, `langchain-mcp-adapters`, `mcp`, `a2a`, `pydantic-settings`, `python-dotenv`
 - Dev dependencies: `pytest`, `pytest-asyncio`, `ruff`
 
 ##### [NEW] [settings.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/src/config/settings.py)
@@ -228,7 +226,7 @@ AiEngineer/
 
 ##### [NEW] [llm_providers.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/src/config/llm_providers.py)
 - Factory pattern: `get_llm(provider: str, model: str) -> BaseChatModel`
-- Support for OpenAI, Groq, Google Gemini, Ollama (local)
+- Support for OpenAI, Anthropic, Groq, Google Gemini, Ollama (local)
 - Automatic fallback between providers
 
 ---
@@ -338,11 +336,6 @@ AiEngineer/
 - Discover remote agents via Agent Cards
 - Delegate tasks to remote agents
 - Handle long-running task status polling
-
-##### [NEW] [a2a_server.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/src/a2a/a2a_server.py)
-- Expose local agents as A2A-compatible services
-- Agent Card publishing with skills/capabilities
-- Request handling via `DefaultRequestHandler`
 
 ---
 
@@ -473,8 +466,10 @@ AiEngineer/
     │   │   └── error_handler.py         # Standardized error responses
     │   │
     │   └── gateway/
-    │       ├── __init__.py
-    │       └── unified_server.py        # Unified MCP gateway (aggregates all tools)
+    │   │   ├── __init__.py
+    │   │   ├── unified_server.py        # Unified MCP gateway (aggregates all tools)
+    │   │   ├── a2a_server.py            # A2A server to expose AiAgents for external consumption
+    │   │   └── agent_card.py            # Agent Card definitions representing AiAgents capabilities
     │
     ├── scripts/
     │   ├── run_all_servers.py           # Start all MCP servers
@@ -568,6 +563,11 @@ AiEngineer/
 - Single MCP server that registers ALL tools from all individual servers
 - Acts as a gateway — agents connect to one endpoint
 - Transport: `streamable_http` on a single port
+
+##### [NEW] [a2a_server.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/MCPServer/src/gateway/a2a_server.py)
+- Exposes LangGraph agents (from Repo 1) as A2A-compatible services to the outside world
+- Acts as an ingress gateway, forwarding incoming A2A requests to Repo 1
+- Agent Card publishing with skills/capabilities
 
 ---
 
