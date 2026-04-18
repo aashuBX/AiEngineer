@@ -9,17 +9,23 @@
 ```mermaid
 graph TB
     subgraph "Repo 1: AiAgents"
-        SA[Supervisor Agent] --> RA[Research Agent]
-        SA --> DA[Data Analysis Agent]
-        SA --> CON[Conversational Agent]
-        SA --> CUA[Custom Agent Builder]
+        INTENT[Intent Agent] --> GUARD_IN[Guardrail Agent]
+        GUARD_IN --> ORCH[Orchestrator]
+        ORCH --> GRAPH_RAG[GraphRag Agent]
+        ORCH --> FAQ[FAQ Agent]
+        ORCH --> CRM[CRM Agent]
+        ORCH --> HANDOFF[HandOff Agent]
+        ORCH --> FEEDBACK[Feedback Agent]
         
-        MCP_C[MCP Client] --> SA
-        A2A_C[A2A Client] --> SA
+        GRAPH_RAG --> GUARD_OUT[Guardrail Agent]
+        FAQ --> GUARD_OUT
+        CRM --> GUARD_OUT
         
-        MEM[Memory & Persistence] --> SA
-        HITL[Human-in-the-Loop] --> SA
-        GUARD[Guardrails & Safety] --> SA
+        MCP_C[MCP Client] --> CRM
+        A2A_C[A2A Client] --> ORCH
+        
+        MEM[Memory & Persistence] --> ORCH
+        HITL[Human-in-the-Loop] --> HANDOFF
     end
 
     subgraph "Repo 2: MCPServer"
@@ -69,7 +75,7 @@ graph TB
 | **MCP Adapters** | `langchain-mcp-adapters` | Bridge MCP tools into LangGraph |
 | **A2A Protocol** | `a2a` | Agent-to-Agent communication |
 | **LLM Providers** | OpenAI, Groq, Google Gemini, Ollama | Multi-provider LLM support |
-| **Vector Databases** | FAISS, Qdrant, ChromaDB | Semantic search |
+| **Vector Databases** | FAISS, Qdrant, ChromaDB, Pinecone | Semantic search |
 | **Knowledge Graph** | Neo4j + `neo4j-graphrag` | GraphRAG, entity relationships |
 | **Embeddings** | `sentence-transformers`, OpenAI | Dense vector embeddings |
 | **Keyword Search** | BM25 (rank-bm25) | Lexical retrieval |
@@ -116,22 +122,27 @@ AiEngineer/
     │   ├── agents/
     │   │   ├── __init__.py
     │   │   ├── base_agent.py            # Abstract base agent class
-    │   │   ├── supervisor/
+    │   │   ├── intent/
     │   │   │   ├── __init__.py
-    │   │   │   ├── supervisor_agent.py  # Central orchestrator (Supervisor pattern)
-    │   │   │   └── router.py            # Conditional routing logic
-    │   │   ├── research/
+    │   │   │   └── intent_agent.py      # Query classification and initial routing
+    │   │   ├── guardrail/
     │   │   │   ├── __init__.py
-    │   │   │   └── research_agent.py    # Web search, summarization, fact-checking
-    │   │   ├── data_analysis/
+    │   │   │   └── guardrail_agent.py   # Input/Output safety and compliance validation
+    │   │   ├── graph_rag/
     │   │   │   ├── __init__.py
-    │   │   │   └── data_agent.py        # Data extraction, analysis, visualization prompts
-    │   │   ├── conversational/
+    │   │   │   └── graph_rag_agent.py   # Interface with GenAISystem Knowledge Graph
+    │   │   ├── crm/
     │   │   │   ├── __init__.py
-    │   │   │   └── chat_agent.py        # General conversational agent with memory
-    │   │   └── rag_agent/
+    │   │   │   └── crm_agent.py         # Handles CRM integrations and customer data
+    │   │   ├── faq/
+    │   │   │   ├── __init__.py
+    │   │   │   └── faq_agent.py         # Handles standard policy and FAQ questions
+    │   │   ├── feedback/
+    │   │   │   ├── __init__.py
+    │   │   │   └── feedback_agent.py    # Processes user ratings and continuous learning
+    │   │   └── handoff/
     │   │       ├── __init__.py
-    │   │       └── rag_agent.py         # Agent that interfaces with GenAISystem for retrieval
+    │   │       └── handoff_agent.py     # Manages human escalation and context transfer
     │   │
     │   ├── graphs/
     │   │   ├── __init__.py
@@ -245,37 +256,37 @@ AiEngineer/
 
 #### Phase 3: Specialized Agents
 
-##### [NEW] [supervisor_agent.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/src/agents/supervisor/supervisor_agent.py)
-- Central orchestrator using LangGraph `StateGraph`
-- Conditional routing to worker agents based on intent classification
-- Aggregation of worker responses
-- Implements the **Supervisor-Worker** pattern
+##### [NEW] [intent_agent.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/src/agents/intent/intent_agent.py)
+- Entry point for all user requests
+- Analyzes intent and context
+- Determines routing paths to specialist agents
 
-##### [NEW] [router.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/src/agents/supervisor/router.py)
-- Intent classification logic
-- Dynamic routing based on agent capabilities
-- Fallback routing when no specialist matches
+##### [NEW] [guardrail_agent.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/src/agents/guardrail/guardrail_agent.py)
+- Input Guard: Checks for PII, prompt injection, and harmful content before processing
+- Output Guard: Validates tone, hallucination likelihood, and policy compliance
+- Can block or sanitize messages
 
-##### [NEW] [research_agent.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/src/agents/research/research_agent.py)
-- Web search via MCP tools (DuckDuckGo, Tavily)
-- Summarization with Chain-of-Thought
-- Fact-checking and source verification
-- Self-consistency validation for research outputs
+##### [NEW] [graph_rag_agent.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/src/agents/graph_rag/graph_rag_agent.py)
+- Interfaces seamlessly with GenAISystem (Repo 3)
+- Synthesizes vector and knowledge graph data to answer deep domain queries
+- Attaches strict citations
 
-##### [NEW] [data_agent.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/src/agents/data_analysis/data_agent.py)
-- Data extraction and transformation
-- Statistical analysis prompts
-- Visualization generation guidance
+##### [NEW] [crm_agent.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/src/agents/crm/crm_agent.py)
+- Uses MCP Client tools to interact with external CRM datasets (Hubspot, Salesforce, etc.)
+- Manages user profiles, lead data, and customized user responses
 
-##### [NEW] [chat_agent.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/src/agents/conversational/chat_agent.py)
-- General-purpose conversational agent
-- Conversation memory (buffer + summary)
-- Personality/tone configuration
+##### [NEW] [faq_agent.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/src/agents/faq/faq_agent.py)
+- Fast-path agent for static or highly structured frequent questions
+- Uses caching or pre-computed BM25 indices to avoid heavy LLM generation
 
-##### [NEW] [rag_agent.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/src/agents/rag_agent/rag_agent.py)
-- Interfaces with GenAISystem for knowledge retrieval
-- Query classification (semantic vs. keyword vs. graph)
-- Context-aware response generation with citations
+##### [NEW] [feedback_agent.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/src/agents/feedback/feedback_agent.py)
+- Collects and aggregates user feedback (thumbs up/down, ratings)
+- Updates memory logs to guide future interactions
+
+##### [NEW] [handoff_agent.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/AiAgents/src/agents/handoff/handoff_agent.py)
+- Detects frustration or explicitly requested human escalation
+- Summarizes the conversation thread and pauses the LangGraph graph
+- Notifies human agent via webhooks for human-in-the-loop takeover
 
 ---
 
@@ -610,6 +621,7 @@ AiEngineer/
     │   │   ├── faiss_store.py           # FAISS implementation
     │   │   ├── qdrant_store.py          # Qdrant implementation (local + cloud)
     │   │   ├── chromadb_store.py        # ChromaDB implementation
+    │   │   ├── pinecone_store.py        # Pinecone implementation (cloud)
     │   │   └── store_factory.py         # Factory to select store by config
     │   │
     │   ├── knowledge_graph/
@@ -749,6 +761,11 @@ AiEngineer/
 - ChromaDB persistent and in-memory modes
 - Collection CRUD, metadata filtering
 - Embedding function integration
+
+##### [NEW] [pinecone_store.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/GenAISystem/src/vectorstores/pinecone_store.py)
+- Pinecone managed cloud vector database client
+- Serverless index management
+- Namespace partitioning and metadata filtering
 
 ##### [NEW] [store_factory.py](file:///Users/aashu-kumar-jha/Documents/projects/AiEngineer/GenAISystem/src/vectorstores/store_factory.py)
 - `get_vector_store(provider: str) -> BaseVectorStore`
@@ -959,7 +976,7 @@ This table ensures every GenAI and Agentic AI concept is covered across the thre
 | **Document Ingestion** | GenAISystem | `ingestion/` |
 | **Chunking Strategies** | GenAISystem | `ingestion/chunking/` |
 | **Embeddings** (Multi-model) | GenAISystem | `embeddings/` |
-| **Vector Databases** (FAISS, Qdrant, Chroma) | GenAISystem | `vectorstores/` |
+| **Vector Databases** (FAISS, Qdrant, Chroma, Pinecone) | GenAISystem | `vectorstores/` |
 | **Knowledge Graph** (Neo4j) | GenAISystem | `knowledge_graph/` |
 | **GraphRAG** | GenAISystem | `knowledge_graph/graph_retriever.py` |
 | **Entity Extraction** | GenAISystem | `knowledge_graph/entity_extractor.py` |
