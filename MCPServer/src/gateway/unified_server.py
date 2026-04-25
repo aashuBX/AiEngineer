@@ -7,10 +7,8 @@ from mcp.server.fastmcp import FastMCP
 
 # Import all sub-servers
 from src.servers.web_search.server import mcp as web_mcp
-from src.servers.calculator.server import mcp as calc_mcp
 from src.servers.database.server import mcp as db_mcp
 from src.servers.file_system.server import mcp as fs_mcp
-from src.servers.weather.server import mcp as weather_mcp
 from src.servers.api_integration.server import mcp as api_mcp
 from src.servers.crm.server import mcp as crm_mcp
 from src.servers.faq.server import mcp as faq_mcp
@@ -35,10 +33,8 @@ def _merge_tools(target: FastMCP, source: FastMCP) -> None:
 
 # Merge all sub-server tools into the unified instance
 _merge_tools(unified_mcp, web_mcp)
-_merge_tools(unified_mcp, calc_mcp)
 _merge_tools(unified_mcp, db_mcp)
 _merge_tools(unified_mcp, fs_mcp)
-_merge_tools(unified_mcp, weather_mcp)
 _merge_tools(unified_mcp, api_mcp)
 _merge_tools(unified_mcp, crm_mcp)
 _merge_tools(unified_mcp, faq_mcp)

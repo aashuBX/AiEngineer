@@ -126,8 +126,6 @@ class ToolRegistry:
             ("web_search", "src.servers.web_search.server"),
             ("database", "src.servers.database.server"),
             ("file_system", "src.servers.file_system.server"),
-            ("calculator", "src.servers.calculator.server"),
-            ("weather", "src.servers.weather.server"),
             ("api_integration", "src.servers.api_integration.server"),
         ]
 
