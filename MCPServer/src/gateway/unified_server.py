@@ -12,6 +12,10 @@ from src.servers.database.server import mcp as db_mcp
 from src.servers.file_system.server import mcp as fs_mcp
 from src.servers.weather.server import mcp as weather_mcp
 from src.servers.api_integration.server import mcp as api_mcp
+from src.servers.crm.server import mcp as crm_mcp
+from src.servers.faq.server import mcp as faq_mcp
+from src.servers.feedback.server import mcp as feedback_mcp
+from src.servers.handoff.server import mcp as handoff_mcp
 
 # Create the unified FastMCP app
 unified_mcp = FastMCP("AiEngineer_Unified_MCP", description="Gateway for all AI Engineer tools")
@@ -36,6 +40,10 @@ _merge_tools(unified_mcp, db_mcp)
 _merge_tools(unified_mcp, fs_mcp)
 _merge_tools(unified_mcp, weather_mcp)
 _merge_tools(unified_mcp, api_mcp)
+_merge_tools(unified_mcp, crm_mcp)
+_merge_tools(unified_mcp, faq_mcp)
+_merge_tools(unified_mcp, feedback_mcp)
+_merge_tools(unified_mcp, handoff_mcp)
 
 if __name__ == "__main__":
     # Provides stdio CLI if executed directly
