@@ -3,6 +3,7 @@ Semantic and Recursive Chunking Strategies.
 """
 
 import logging
+from typing import Any
 from langchain_core.documents import Document
 
 logger = logging.getLogger(__name__)

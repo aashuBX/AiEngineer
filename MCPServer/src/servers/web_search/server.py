@@ -10,7 +10,7 @@ from typing import Any
 from src.config.settings import settings
 
 # Create a FastMCP app
-mcp = FastMCP("web_search_server", description="Web search and scraping tools")
+mcp = FastMCP("web_search_server")
 
 
 @mcp.tool()

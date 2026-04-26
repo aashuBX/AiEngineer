@@ -25,14 +25,53 @@ hybrid_retriever = None
 response_generator = None
 
 
+def _create_llm():
+    """Create an LLM instance based on the configured provider."""
+    provider = settings.llm_provider.lower()
+    logger.info(f"Creating LLM: provider={provider}, model={settings.llm_model}")
+
+    if provider == "groq":
+        from langchain_groq import ChatGroq
+        return ChatGroq(
+            model=settings.llm_model,
+            api_key=settings.groq_api_key,
+            temperature=0,
+        )
+    elif provider == "openai":
+        from langchain_openai import ChatOpenAI
+        return ChatOpenAI(
+            model=settings.llm_model,
+            temperature=0,
+        )
+    elif provider == "anthropic":
+        from langchain_anthropic import ChatAnthropic
+        return ChatAnthropic(
+            model=settings.llm_model,
+            temperature=0,
+        )
+    elif provider == "google":
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        return ChatGoogleGenerativeAI(
+            model=settings.llm_model,
+            temperature=0,
+        )
+    elif provider == "ollama":
+        from langchain_ollama import ChatOllama
+        return ChatOllama(
+            model=settings.llm_model,
+            temperature=0,
+        )
+    else:
+        raise ValueError(f"Unsupported LLM provider: {provider}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global vector_store, kg_builder, hybrid_retriever, response_generator
     logger.info("Initializing GenAISystem backends...")
     
-    # Init LLM (generic import for factory)
-    from langchain_groq import ChatGroq
-    llm = ChatGroq(model=settings.llm_model, api_key=settings.groq_api_key, temperature=0)
+    # Init LLM via dynamic provider factory
+    llm = _create_llm()
     
     # Init stores
     vector_store = get_vector_store()
@@ -54,6 +93,7 @@ async def lifespan(app: FastAPI):
     
     yield
     logger.info("Shutting down GenAISystem...")
+
 
 
 app = FastAPI(title="GenAISystem API", lifespan=lifespan)

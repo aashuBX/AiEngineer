@@ -8,7 +8,7 @@ from typing import Any
 
 from src.config.settings import settings
 
-mcp = FastMCP("database_server", description="Database introspection and querying")
+mcp = FastMCP("database_server")
 
 
 def _get_engine():

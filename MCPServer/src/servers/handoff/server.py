@@ -5,7 +5,7 @@ Provides escalation and routing tools for the Handoff Agent.
 
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("handoff_server", description="Handoff and Escalation Tools")
+mcp = FastMCP("handoff_server")
 
 @mcp.tool()
 def route_to_returns_specialist(order_id: str, urgency: str) -> str:

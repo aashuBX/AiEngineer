@@ -5,6 +5,7 @@ Chains together loader -> cleaner -> chunker -> (vectorstore / knowledge graph).
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from src.ingestion.data_loader import DataLoader
 from src.ingestion.preprocessing.text_cleaner import TextCleaner

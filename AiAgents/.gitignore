@@ -16,10 +16,6 @@ build/
 venv/
 env/
 
-# Environment variables
-.env
-.env.*
-!.env.example
 
 # Data & checkpoints
 data/checkpoints.db

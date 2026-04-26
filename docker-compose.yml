@@ -1,56 +1,126 @@
-version: "3.8"
 
 services:
-  # ── Databases ────────────────────────────────────────────────────────
+
+  # ── Databases ─────────────────────────────────────────────────────────────
+
   neo4j:
     image: neo4j:5.20.0
     container_name: genai-neo4j
     ports:
-      - "7474:7474" # HTTP
-      - "7687:7687" # Bolt
+      - "7474:7474"   # HTTP Browser
+      - "7687:7687"   # Bolt
     environment:
-      - NEO4J_AUTH=neo4j/my-secret-password
+      - NEO4J_AUTH=${NEO4J_USERNAME}/${NEO4J_PASSWORD}
       - NEO4J_PLUGINS=["apoc"]
     volumes:
       - neo4j_data:/data
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "my-secret-password", "RETURN 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD", "cypher-shell", "-u", "${NEO4J_USERNAME}", "-p", "${NEO4J_PASSWORD}", "RETURN 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
 
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: genai-qdrant
+  mysql:
+    image: mysql:8.0
+    container_name: crm-mysql
     ports:
-      - "6333:6333" # HTTP API
-      - "6334:6334" # gRPC
-    volumes:
-      - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  postgres:
-    image: postgres:15-alpine
-    container_name: mcp-db
-    ports:
-      - "5432:5432"
+      - "3306:3306"
     environment:
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=pass
-      - POSTGRES_DB=crm_db
+      - MYSQL_ROOT_PASSWORD=root_password
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d crm_db"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "${MYSQL_USER}", "-p${MYSQL_PASSWORD}"]
       interval: 10s
       timeout: 5s
+      retries: 6
+
+  # ── Application Services ───────────────────────────────────────────────────
+
+  mcp_server:
+    build:
+      context: ./MCPServer
+      dockerfile: Dockerfile
+    container_name: mcp-server
+    ports:
+      - "8002:8002"
+    env_file:
+      - .env
+    environment:
+      - PORT=8002
+      - HOST=0.0.0.0
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 15s
+      timeout: 5s
       retries: 5
+
+  genai_system:
+    build:
+      context: ./GenAISystem
+      dockerfile: Dockerfile
+    container_name: genai-system
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    environment:
+      - PORT=8001
+      - HOST=0.0.0.0
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  ai_agents:
+    build:
+      context: ./AiAgents
+      dockerfile: Dockerfile
+    container_name: ai-agents
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - PORT=8000
+      - HOST=0.0.0.0
+    depends_on:
+      mcp_server:
+        condition: service_healthy
+      genai_system:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  platform_ui:
+    build:
+      context: ./PlatformUI
+      dockerfile: Dockerfile
+    container_name: platform-ui
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    environment:
+      - AGENTS_API_URL=http://ai_agents:8000
+      - GENAI_SYSTEM_URL=http://genai_system:8001
+    depends_on:
+      ai_agents:
+        condition: service_healthy
 
 volumes:
   neo4j_data:
-  qdrant_data:
-  pg_data:
+  mysql_data:

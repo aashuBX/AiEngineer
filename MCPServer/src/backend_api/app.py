@@ -87,7 +87,7 @@ except ImportError:
 @app.get("/health", tags=["System"])
 async def health_check():
     """System health check endpoint."""
-    return {"status": "ok", "tools_count": len(unified_mcp._tool_manager.tools)}
+    return {"status": "ok", "tools_count": len(unified_mcp._tool_manager._tools)}
 
 
 if __name__ == "__main__":

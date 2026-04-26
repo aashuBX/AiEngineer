@@ -22,6 +22,7 @@ class TaskStatus(str, Enum):
 class IntentType(str, Enum):
     FAQ = "faq"
     CRM = "crm"
+    RAG = "rag"
     GRAPH_RAG = "graph_rag"
     FEEDBACK = "feedback"
     HANDOFF = "handoff"

@@ -9,7 +9,7 @@ from mcp.server.fastmcp import FastMCP
 
 from src.config.settings import settings
 
-mcp = FastMCP("file_system_server", description="Read and write files within permitted directories")
+mcp = FastMCP("file_system_server")
 
 
 def _is_safe_path(requested_path: str) -> bool:

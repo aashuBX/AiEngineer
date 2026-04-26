@@ -6,7 +6,7 @@ Currently, these tools are implemented as stubs (comments only) as per workflow 
 
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("crm_server", description="CRM tools across different industries")
+mcp = FastMCP("crm_server")
 
 # ==========================================
 # 1. E-Commerce Platform (Retail)

@@ -5,7 +5,7 @@ Provides data ingestion tools for the Feedback Agent.
 
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("feedback_server", description="Feedback and Survey Tools")
+mcp = FastMCP("feedback_server")
 
 @mcp.tool()
 def submit_product_review(product_id: str, rating: int, review: str) -> str:

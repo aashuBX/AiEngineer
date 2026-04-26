@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     mcp_api_key: str = Field(default="", description="MCPServer API key")
 
     # ── Long-term Vector Memory ────────────────────────────────────────────
-    vector_memory_provider: Literal["faiss", "qdrant"] = "faiss"
+    vector_memory_provider: Literal["faiss", "qdrant", "pinecone"] = "faiss"
     qdrant_url: str = "http://localhost:6333"
 
     # ── Ollama (local) ─────────────────────────────────────────────────────

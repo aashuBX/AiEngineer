@@ -5,7 +5,7 @@ Provides static policy lookup and rule verification for the FAQ Agent.
 
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("faq_server", description="FAQ and Policy Tools")
+mcp = FastMCP("faq_server")
 
 @mcp.tool()
 def get_shipping_policy(region: str) -> str:

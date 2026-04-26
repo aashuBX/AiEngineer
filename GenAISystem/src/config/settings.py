@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     neo4j_password: str = "password"
 
     # ── Vector Store ───────────────────────────────────────────────────────
-    vector_store_provider: Literal["faiss", "qdrant"] = "faiss"
+    vector_store_provider: Literal["faiss", "qdrant", "pinecone"] = "faiss"
     qdrant_url: str = "http://localhost:6333"
 
 

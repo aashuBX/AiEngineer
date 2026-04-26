@@ -16,15 +16,13 @@ from src.servers.feedback.server import mcp as feedback_mcp
 from src.servers.handoff.server import mcp as handoff_mcp
 
 # Create the unified FastMCP app
-unified_mcp = FastMCP("AiEngineer_Unified_MCP", description="Gateway for all AI Engineer tools")
+unified_mcp = FastMCP("AiEngineer_Unified_MCP")
 
 
 def _merge_tools(target: FastMCP, source: FastMCP) -> None:
     """Manually register tools from a source FastMCP into a target FastMCP."""
-    # FastMCP stores registered tools in a private _tool_manager.
-    # We iterate and re-register them on the unified server.
-    for tool_name, tool_data in source._tool_manager.tools.items():
-        # FastMCP stores tools as Tool objects, we can bind the original functions
+    # FastMCP stores registered tools in a private _tool_manager._tools dict.
+    for tool_name, tool_data in source._tool_manager._tools.items():
         target.tool(
             name=tool_name,
             description=tool_data.description

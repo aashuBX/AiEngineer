@@ -6,7 +6,7 @@ Generic tool to safely call external REST endpoints.
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("api_integration_server", description="Generic REST API integration")
+mcp = FastMCP("api_integration_server")
 
 
 @mcp.tool()
