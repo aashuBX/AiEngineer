@@ -1,95 +1,86 @@
 """
-MCPServer FastAPI Application.
-Exposes the Unified FastMCP via Server-Sent Events (SSE) and handles A2A connections.
+MCPServer Application — FastMCP Streamable HTTP transport (mcp SDK v1.0+).
+
+Endpoint map:
+  GET  http://mcp-server:8002/health  ← container healthcheck
+  POST http://mcp-server:8002/mcp     ← MCP protocol (used by ai-agents)
+
+Why we use FastMCP's Starlette app directly (NOT mounted inside FastAPI):
+  FastAPI does NOT propagate its lifespan to mounted sub-apps.
+  FastMCP's Starlette app has its own lifespan that initialises the
+  StreamableHTTPSessionManager task group — if that lifespan is skipped
+  every request fails with:
+    RuntimeError: Task group is not initialized. Make sure to use run().
+  Solution: use the Starlette app as the root ASGI app and inject our
+  /health route directly into its router.
 """
 
 import logging
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, Request
 from starlette.middleware.cors import CORSMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 from src.config.settings import settings
 from src.gateway.unified_server import unified_mcp
 
-# Standard logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mcp_backend")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup: configure FastMCP context or connections if needed
-    logger.info("MCPServer Backend starting up...")
-    yield
-    # Shutdown
-    logger.info("MCPServer Backend shutting down...")
+# ── Health endpoint handler ────────────────────────────────────────────────────
+async def health_endpoint(request: Request) -> JSONResponse:
+    """Container liveness / healthcheck — always returns 200 when server is up."""
+    tool_count = len(unified_mcp._tool_manager._tools)
+    return JSONResponse({"status": "ok", "tools_count": tool_count})
 
 
-app = FastAPI(
-    title="MCPServer Gateway",
-    description="Unified API for MCP Tools via SSE and HTTP REST",
-    version="0.1.0",
-    lifespan=lifespan,
-)
+# ── Build the FastMCP Starlette app ───────────────────────────────────────────
+# streamable_http_app() returns a Starlette app whose lifespan initialises the
+# session manager's task group. We use it as the ROOT ASGI app.
+logger.info("MCPServer Backend starting up...")
+app = unified_mcp.streamable_http_app()
 
-# CORS configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Adjust for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Inject /health BEFORE the /mcp route so it matches first.
+app.router.routes.insert(0, Route("/health", health_endpoint, methods=["GET"]))
+logger.info(f"Registered routes: {[r.path for r in app.routes]}")
 
 
-def verify_api_key(request: Request):
-    """Simple API Key auth checking X-API-Key header."""
-    if not settings.mcp_api_key:
-        return  # Auth disabled
-    api_key = request.headers.get("X-API-Key")
-    if api_key != settings.mcp_api_key:
-        raise HTTPException(status_code=401, detail="Invalid API Key")
+# ── Auth middleware (guards /mcp/* only) ───────────────────────────────────────
+class AuthMiddleware:
+    """Rejects calls to /mcp without a valid X-API-Key header."""
 
+    def __init__(self, app_inner):
+        self._app = app_inner
 
-# ── FastMCP SSE Endpoints ──────────────────────────────────────────────────────
-
-# FastMCP provides an ASGI app for SSE transport, but we need to mount it
-# or wire it manually. As of mcp python SDK 1.0+, FastMCP integrates with starlette.
-
-try:
-    from mcp.server.fastmcp import create_starlette_app
-    # Create the internal SSE app
-    sse_app = create_starlette_app(unified_mcp, debug=True)
-
-    # Mount the SSE app under /mcp, applying auth dependency manually below.
-    # Note: Mounting completely hands over the route. Wait, FastMCP create_starlette_app
-    # returns an ASGI app. If we mount it, auth will be bypassed unless handled at middleware.
-    
-    # Let's add an auth middleware specifically for the /mcp path
-    @app.middleware("http")
-    async def auth_middleware(request: Request, call_next):
-        if request.url.path.startswith("/mcp"):
-            if settings.mcp_api_key:
-                api_key = request.headers.get("X-API-Key")
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            path: str = scope.get("path", "")
+            if path.startswith("/mcp") and settings.mcp_api_key:
+                headers = dict(scope.get("headers", []))
+                api_key = headers.get(b"x-api-key", b"").decode()
                 if api_key != settings.mcp_api_key:
-                    from fastapi.responses import JSONResponse
-                    return JSONResponse(status_code=401, content={"detail": "Invalid API Key"})
-        return await call_next(request)
-
-    app.mount("/mcp", sse_app)
-    logger.info("Mounted FastMCP SSE transport at /mcp")
-except ImportError:
-    logger.error("Could not mount FastMCP SSE. Ensure mcp SDK is v1.0.0+")
+                    response = JSONResponse(
+                        {"detail": "Invalid or missing X-API-Key"}, status_code=401
+                    )
+                    await response(scope, receive, send)
+                    return
+        await self._app(scope, receive, send)
 
 
-# ── Health Status ──────────────────────────────────────────────────────────────
+# ── CORS middleware ────────────────────────────────────────────────────────────
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(AuthMiddleware)
 
-@app.get("/health", tags=["System"])
-async def health_check():
-    """System health check endpoint."""
-    return {"status": "ok", "tools_count": len(unified_mcp._tool_manager._tools)}
+logger.info("FastMCP streamable-http transport ready — MCP endpoint: /mcp")
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("src.backend_api.app:app", host=settings.host, port=settings.port, reload=True)
+    uvicorn.run(
+        "src.backend_api.app:app",
+        host=settings.host,
+        port=settings.port,
+        reload=False,  # reload=True breaks anyio task groups
+    )
+

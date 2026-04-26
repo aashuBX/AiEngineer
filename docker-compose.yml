@@ -15,10 +15,11 @@ services:
     volumes:
       - neo4j_data:/data
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "${NEO4J_USERNAME}", "-p", "${NEO4J_PASSWORD}", "RETURN 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
       interval: 15s
       timeout: 10s
-      retries: 6
+      retries: 10
+      start_period: 90s
 
   mysql:
     image: mysql:8.0
@@ -36,7 +37,8 @@ services:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "${MYSQL_USER}", "-p${MYSQL_PASSWORD}"]
       interval: 10s
       timeout: 5s
-      retries: 6
+      retries: 10
+      start_period: 30s
 
   # ── Application Services ───────────────────────────────────────────────────
 

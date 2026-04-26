@@ -1,6 +1,9 @@
 """
 MCP Client — MultiServerMCPClient wrapper for connecting to MCPServer.
 Supports stdio (local dev) and streamable_http (production) transports.
+
+NOTE: As of langchain-mcp-adapters 0.1.0, MultiServerMCPClient can no longer
+be used as a context manager. We instantiate it directly and call get_tools().
 """
 
 from contextlib import asynccontextmanager
@@ -43,14 +46,36 @@ class MCPClientManager:
 
     @asynccontextmanager
     async def connect(self):
-        """Async context manager — connects to all configured MCP servers."""
+        """Async context manager — connects to all configured MCP servers.
+
+        Uses the langchain-mcp-adapters 0.1.0+ API:
+          client = MultiServerMCPClient(...)
+          tools  = await client.get_tools()
+        """
         logger.info(f"Connecting to MCP servers: {list(self._server_configs.keys())}")
-        async with MultiServerMCPClient(self._server_configs) as client:
-            self._client = client
-            self._tools = client.get_tools()
-            logger.info(f"MCP connected — {len(self._tools)} tools available: "
-                        f"{[t.name for t in self._tools]}")
+        self._client = MultiServerMCPClient(self._server_configs)
+        try:
+            self._tools = await self._client.get_tools()
+            logger.info(
+                f"MCP connected — {len(self._tools)} tools available: "
+                f"{[t.name for t in self._tools]}"
+            )
             yield self
+        finally:
+            # Best-effort cleanup — close underlying sessions if the client
+            # exposes a close/aclose method (varies by adapter version).
+            close_fn = getattr(self._client, "aclose", None) or getattr(self._client, "close", None)
+            if close_fn:
+                try:
+                    import inspect
+                    if inspect.iscoroutinefunction(close_fn):
+                        await close_fn()
+                    else:
+                        close_fn()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"MCPClient cleanup error (non-fatal): {exc}")
+            self._client = None
+            self._tools = []
 
     @property
     def tools(self) -> list[BaseTool]:
