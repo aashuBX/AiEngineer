@@ -11,13 +11,21 @@ logger = get_logger(__name__)
 
 
 class HybridRetriever:
-    """Retrieves and merges contexts from both Vector DB and Knowledge Graph."""
+    """Retrieves and merges contexts from Vector DB, Knowledge Graph, and BM25."""
 
-    def __init__(self, vector_store: Any, llm: Any, llm_reranker: Any = None, cross_encoder: Any = None):
+    def __init__(
+        self,
+        vector_store: Any,
+        llm: Any,
+        llm_reranker: Any = None,
+        cross_encoder: Any = None,
+        keyword_retriever: Any = None,
+    ):
         self.vector_store = vector_store
         self.llm = llm
         self.llm_reranker = llm_reranker
         self.cross_encoder = cross_encoder
+        self.keyword_retriever = keyword_retriever
         self._graph = None
 
     def _get_graph(self):
@@ -34,44 +42,72 @@ class HybridRetriever:
                 logger.warning(f"Neo4j unavailable for retrieval: {e}")
         return self._graph
 
-    def async_retrieve(self, query: str, top_k: int = 5, rerank_strategy: str = "auto") -> list[Document]:
-        """Perform unified retrieval sequentially (could be async in prod)."""
-        logger.info(f"Hybrid retrieval for query: {query} (Strategy: {rerank_strategy})")
+    def async_retrieve(
+        self,
+        query: str,
+        strategy: str = "hybrid",
+        top_k: int = 5,
+        rerank_strategy: str = "auto"
+    ) -> list[Document]:
+        """Perform unified retrieval using specified strategy."""
+        logger.info(f"Retrieval strategy='{strategy}', rerank='{rerank_strategy}' for query: {query}")
         
-        # 1. Vector Search
-        vector_docs = []
-        try:
-            vector_docs = self.vector_store.similarity_search(query, k=top_k)
-            logger.debug(f"Vector search returned {len(vector_docs)} docs")
-        except Exception as e:
-            logger.error(f"Vector search failed: {e}")
+        all_docs = []
 
-        # 2. Graph Search (GraphQA chain / Extract)
-        graph_docs = []
-        graph = self._get_graph()
-        if graph:
+        # ── 1. Vector & BM25 Search (Reciprocal Rank Fusion) ──
+        if strategy in ("vector", "hybrid"):
+            # Dense Vector Search
+            dense_docs = []
             try:
-                # Basic unstructured graph querying using GraphQA
-                from langchain_neo4j import GraphCypherQAChain
-                chain = GraphCypherQAChain.from_llm(
-                    self.llm,
-                    graph=graph,
-                    verbose=True,
-                    return_direct=True, # We just want the context, not final answer
-                )
-                graph_res = chain.invoke({"query": query})
-                raw_graph_res = graph_res.get("result", "")
-                if raw_graph_res:
-                    graph_docs.append(Document(
-                        page_content=str(raw_graph_res),
-                        metadata={"source": "Neo4j_Cypher_QA"}
-                    ))
+                # Overfetch for fusion and reranking
+                dense_docs = self.vector_store.similarity_search(query, k=top_k * 3)
+                logger.debug(f"Dense search returned {len(dense_docs)} docs")
             except Exception as e:
-                logger.error(f"Graph retrieval failed: {e}")
+                logger.error(f"Dense search failed: {e}")
 
-        # 3. Reciprocal Rank Fusion / De-duplication
-        all_docs = vector_docs + graph_docs
-        
+            # Sparse BM25 Search
+            sparse_docs = []
+            if self.keyword_retriever:
+                try:
+                    kw_results = self.keyword_retriever.retrieve(query, top_k=top_k * 3)
+                    sparse_docs = [
+                        Document(page_content=r["content"], metadata={**r["metadata"], "source": "BM25"})
+                        for r in kw_results
+                    ]
+                    logger.debug(f"BM25 search returned {len(sparse_docs)} docs")
+                except Exception as e:
+                    logger.error(f"BM25 search failed: {e}")
+
+            # Fuse Dense and Sparse
+            from src.retrieval.fusion import ReciprocalRankFusion
+            fusion = ReciprocalRankFusion()
+            fused_vector_docs = fusion.fuse(dense_docs, sparse_docs)
+            all_docs.extend(fused_vector_docs)
+
+        # ── 2. Graph Search ──
+        if strategy in ("graph", "hybrid"):
+            graph = self._get_graph()
+            if graph:
+                try:
+                    from langchain_neo4j import GraphCypherQAChain
+                    chain = GraphCypherQAChain.from_llm(
+                        self.llm,
+                        graph=graph,
+                        verbose=False,
+                        return_direct=True, # We just want the context
+                    )
+                    graph_res = chain.invoke({"query": query})
+                    raw_graph_res = graph_res.get("result", "")
+                    if raw_graph_res:
+                        all_docs.append(Document(
+                            page_content=str(raw_graph_res),
+                            metadata={"source": "Neo4j_Cypher_QA"}
+                        ))
+                        logger.debug("Graph search returned 1 result")
+                except Exception as e:
+                    logger.error(f"Graph retrieval failed: {e}")
+
+        # Deduplicate
         seen = set()
         unique_docs = []
         for d in all_docs:
@@ -79,21 +115,28 @@ class HybridRetriever:
                 seen.add(d.page_content)
                 unique_docs.append(d)
 
-        # Determine Routing Strategy
+        if not unique_docs:
+            return []
+
+        # ── 3. Routing & Reranking ──
         if rerank_strategy == "auto":
             query_lower = query.lower()
-            complex_keywords = ["compare", "difference", "analyze", "why", "summarize", "pros and cons", "evaluate", "reason"]
-            if any(k in query_lower for k in complex_keywords) or len(query.split()) > 15:
+            complex_keywords = ["compare", "difference", "analyze", "why", "summarize", "evaluate", "reason"]
+            word_count = len(query.split())
+            
+            if any(k in query_lower for k in complex_keywords) or word_count > 15:
                 rerank_strategy = "llm_reranker"
             else:
                 rerank_strategy = "cross_encoder"
                 
         # Apply reranker based on strategy
-        if rerank_strategy == "llm_reranker" and self.llm_reranker and unique_docs:
+        if rerank_strategy == "llm_reranker" and self.llm_reranker:
             logger.info("Routing to LLM Reranker")
-            return self.llm_reranker.rerank(query, unique_docs, top_k=top_k)
-        elif rerank_strategy == "cross_encoder" and self.cross_encoder and unique_docs:
+            unique_docs = self.llm_reranker.rerank(query, unique_docs, top_k=top_k)
+        elif rerank_strategy == "cross_encoder" and self.cross_encoder:
             logger.info("Routing to Cross-Encoder")
-            return self.cross_encoder.rerank(query, unique_docs, top_k=top_k)
+            unique_docs = self.cross_encoder.rerank(query, unique_docs, top_k=top_k)
+        else:
+            unique_docs = unique_docs[:top_k]
 
-        return unique_docs[:top_k]
+        return unique_docs

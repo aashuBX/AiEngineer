@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     pinecone_index_name: str = "genai-documents"
     pinecone_environment: str = "gcp-starter"
 
+    # ── Semantic Cache ─────────────────────────────────────────────────────
+    redis_url: str = ""                    # empty = use in-memory fallback
+    semantic_cache_threshold: float = 0.95 # cosine similarity hit threshold
+    semantic_cache_ttl_hours: int = 24     # cache TTL in hours
+
+    # ── Extractive QA Bypass ───────────────────────────────────────────────
+    extractive_qa_threshold: float = 0.92  # rerank score above which LLM is skipped
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

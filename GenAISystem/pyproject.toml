@@ -50,6 +50,11 @@ dependencies = [
     
     # Evaluation
     "ragas>=0.1.0",
+
+    # Hybrid Search & Caching
+    "rank-bm25>=0.2.2",
+    "numpy>=1.26.0",
+    "redis>=5.0.0",
 ]
 
 [project.optional-dependencies]

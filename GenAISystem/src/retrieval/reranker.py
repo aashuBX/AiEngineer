@@ -57,8 +57,12 @@ class CrossEncoderReranker:
             scored_docs = list(zip(documents, scores))
             scored_docs.sort(key=lambda x: x[1], reverse=True)
 
-            # Return top-k documents
-            return [doc for doc, score in scored_docs[:top_k]]
+            # Return top-k documents with score injected into metadata
+            results = []
+            for doc, score in scored_docs[:top_k]:
+                doc.metadata["rerank_score"] = float(score)
+                results.append(doc)
+            return results
         except Exception as e:
             logger.error(f"Reranking failed: {e}")
             return documents[:top_k]

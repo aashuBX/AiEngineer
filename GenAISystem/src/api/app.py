@@ -25,6 +25,8 @@ vector_store = None
 kg_builder = None
 hybrid_retriever = None
 response_generator = None
+semantic_cache = None
+keyword_retriever = None
 
 
 def _create_llm():
@@ -69,15 +71,27 @@ def _create_llm():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global vector_store, kg_builder, hybrid_retriever, response_generator
+    global vector_store, kg_builder, hybrid_retriever, response_generator, semantic_cache, keyword_retriever
     logger.info("Initializing GenAISystem backends...")
     
     # Init LLM via dynamic provider factory
     llm = _create_llm()
+    embeddings = get_embeddings()
     
     # Init stores
     vector_store = get_vector_store()
     kg_builder = KnowledgeGraphBuilder(llm=llm)
+    
+    # Init Cache and Keyword Retriever
+    from src.retrieval.semantic_cache import SemanticCache
+    from src.retrieval.keyword_retriever import KeywordRetriever
+    semantic_cache = SemanticCache(
+        embeddings=embeddings,
+        threshold=settings.semantic_cache_threshold,
+        ttl_hours=settings.semantic_cache_ttl_hours,
+        redis_url=settings.redis_url
+    )
+    keyword_retriever = KeywordRetriever()
     
     # Init RAG pieces
     from src.retrieval.llm_reranker import LLMReranker
@@ -89,7 +103,8 @@ async def lifespan(app: FastAPI):
         vector_store=vector_store,
         llm=llm,
         llm_reranker=llm_reranker,
-        cross_encoder=cross_encoder
+        cross_encoder=cross_encoder,
+        keyword_retriever=keyword_retriever
     )
     response_generator = ResponseGenerator(llm=llm)
     
@@ -118,53 +133,36 @@ async def retrieve_and_generate(req: QueryRequest):
     """
     RAG Query endpoint.
     strategy:
-      - "vector"  → Pinecone similarity search only (RagAgent)
-      - "graph"   → Neo4j knowledge graph only (GraphRagAgent)
+      - "vector"  → Pinecone + BM25
+      - "graph"   → Neo4j knowledge graph only
       - "hybrid"  → Both combined
     """
     from langchain_core.documents import Document
 
     try:
-        docs = []
+        # ── 1. Semantic Cache Check ──
+        if semantic_cache:
+            cache_res = semantic_cache.get(req.query)
+            if cache_res:
+                return {
+                    "query": req.query,
+                    "strategy": req.strategy,
+                    "answer": cache_res["answer"],
+                    "documents": [],
+                    "citations": [],
+                    "cache_hit": True,
+                    "cache_score": cache_res["cache_score"]
+                }
 
-        if req.strategy in ("vector", "hybrid"):
-            # Pinecone vector similarity search
-            try:
-                vector_docs = vector_store.similarity_search(req.query, k=req.top_k)
-                docs.extend(vector_docs)
-                logger.info(f"Vector search returned {len(vector_docs)} docs")
-            except Exception as e:
-                logger.error(f"Vector search failed: {e}")
+        # ── 2. Unified Retrieval (Dense, Sparse, Graph, RRF, Rerank) ──
+        docs = hybrid_retriever.async_retrieve(
+            req.query,
+            strategy=req.strategy,
+            top_k=req.top_k,
+            rerank_strategy=req.rerank_strategy
+        )
 
-        if req.strategy in ("graph", "hybrid"):
-            # Neo4j knowledge graph search
-            try:
-                from langchain_neo4j import Neo4jGraph, GraphCypherQAChain
-                graph = Neo4jGraph(
-                    url=settings.neo4j_uri,
-                    username=settings.neo4j_username,
-                    password=settings.neo4j_password,
-                )
-                chain = GraphCypherQAChain.from_llm(
-                    _create_llm(), graph=graph, verbose=False, return_direct=True
-                )
-                graph_res = chain.invoke({"query": req.query})
-                raw = graph_res.get("result", "")
-                if raw:
-                    docs.append(Document(page_content=str(raw), metadata={"source": "Neo4j"}))
-                    logger.info("Graph search returned 1 result")
-            except Exception as e:
-                logger.error(f"Graph search failed: {e}")
-
-        # Rerank if hybrid
-        if req.strategy == "hybrid" and docs:
-            docs = hybrid_retriever.async_retrieve(
-                req.query, top_k=req.top_k, rerank_strategy=req.rerank_strategy
-            )
-        else:
-            docs = docs[:req.top_k]
-
-        # ── Mock fallback: if no docs found, return placeholder context ────────
+        # ── 3. Mock fallback if no docs found ──
         if not docs:
             logger.warning(f"No documents found for query '{req.query}' — returning mock context")
             docs = [
@@ -177,21 +175,49 @@ async def retrieve_and_generate(req: QueryRequest):
                 )
             ]
 
-        # Format for the calling agent
         formatted_docs = [
             {"content": d.page_content, "metadata": d.metadata}
             for d in docs
         ]
 
-        # Generate a direct answer
+        # ── 4. Extractive QA Bypass Check ──
+        top_doc = docs[0]
+        top_score = top_doc.metadata.get("rerank_score", 0)
+        
+        if top_score >= settings.extractive_qa_threshold and req.strategy != "graph":
+            logger.info(f"LLM Bypass triggered (score {top_score:.3f} >= {settings.extractive_qa_threshold})")
+            answer = top_doc.page_content
+            citations = [{"id": 1, "source": top_doc.metadata.get("source"), "snippet": answer[:150]}]
+            
+            # Cache the exact match
+            if semantic_cache:
+                semantic_cache.set(req.query, answer)
+                
+            return {
+                "query": req.query,
+                "strategy": req.strategy,
+                "answer": answer,
+                "documents": formatted_docs,
+                "citations": citations,
+                "llm_bypassed": True,
+                "bypass_reason": f"High-confidence exact match (score={top_score:.3f})"
+            }
+
+        # ── 5. LLM Synthesis ──
         gen_res = await response_generator.generate_answer(req.query, docs)
+        answer = gen_res.get("answer")
+
+        # Cache the generated response
+        if semantic_cache and answer:
+            semantic_cache.set(req.query, answer)
 
         return {
             "query": req.query,
             "strategy": req.strategy,
-            "answer": gen_res.get("answer"),
+            "answer": answer,
             "documents": formatted_docs,
             "citations": gen_res.get("citations", []),
+            "llm_bypassed": False
         }
     except Exception as e:
         logger.error(f"Query endpoint error: {e}")
