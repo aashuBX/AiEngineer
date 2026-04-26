@@ -117,6 +117,8 @@ async def chat(req: ChatRequest):
         from src.agents.faq.faq_agent import FAQAgent
         from src.agents.feedback.feedback_agent import FeedbackAgent
         from src.agents.handoff.handoff_agent import HandoffAgent
+        from src.agents.rag.rag_agent import RagAgent
+        from src.agents.graph_rag.graph_rag_agent import GraphRagAgent
         from src.graphs.multi_agent_graph import build_supervisor_graph
 
         tools = getattr(app.state, "mcp_tools", [])
@@ -152,12 +154,20 @@ async def chat(req: ChatRequest):
 
         handoff = HandoffAgent()
         handoff.register_tools(tools)
+        
+        rag = RagAgent()
+        rag.register_tools(tools)
+        
+        graph_rag = GraphRagAgent()
+        graph_rag.register_tools(tools)
 
         worker_nodes = {
             "crm_agent": crm.process,
             "faq_agent": faq.process,
             "feedback_agent": feedback.process,
             "handoff_agent": handoff.process,
+            "rag_agent": rag.process,
+            "graph_rag_agent": graph_rag.process,
         }
 
         # ── Run the LangGraph Supervisor pipeline ──────────────────────────

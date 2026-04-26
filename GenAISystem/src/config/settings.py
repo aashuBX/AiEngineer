@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # ── Vector Store ───────────────────────────────────────────────────────
     vector_store_provider: Literal["faiss", "qdrant", "pinecone"] = "faiss"
     qdrant_url: str = "http://localhost:6333"
+    pinecone_api_key: str = ""
+    pinecone_index_name: str = "genai-documents"
+    pinecone_environment: str = "gcp-starter"
 
 
 @lru_cache(maxsize=1)

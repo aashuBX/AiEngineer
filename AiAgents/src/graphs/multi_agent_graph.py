@@ -16,14 +16,15 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # Available specialist workers
-WORKERS = ["faq_agent", "crm_agent", "graph_rag_agent", "feedback_agent", "handoff_agent"]
+WORKERS = ["faq_agent", "crm_agent", "rag_agent", "graph_rag_agent", "feedback_agent", "handoff_agent"]
 
 _SUPERVISOR_PROMPT = """You are a Supervisor Agent coordinating a team of specialist AI agents.
 
 Available workers:
 - faq_agent       → General FAQ and policy questions
 - crm_agent       → Customer data, orders, account queries
-- graph_rag_agent → Deep domain knowledge requiring document synthesis
+- rag_agent       → Standard document searches across uploaded manuals/PDFs
+- graph_rag_agent → Deep domain knowledge requiring entity connection or graph synthesis
 - feedback_agent  → User feedback and ratings
 - handoff_agent   → Human escalation requests
 

@@ -1,6 +1,6 @@
 """
-GraphRAG Agent — interfaces with GenAISystem's hybrid retrieval pipeline
-(vector search + knowledge graph) to answer deep domain queries with citations.
+Rag Agent — interfaces with GenAISystem's vector retrieval pipeline
+to answer queries using uploaded documents with citations.
 """
 
 from typing import Any
@@ -14,9 +14,9 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_GRAPH_RAG_SYSTEM_PROMPT = """You are a Knowledge Synthesis Agent with access to a rich knowledge base.
+_RAG_SYSTEM_PROMPT = """You are a Document Synthesis Agent with access to uploaded knowledge.
 
-You have been given retrieved context from both a vector database and a knowledge graph.
+You have been given retrieved context from a vector database of user documents.
 Your job is to:
 1. Synthesize the retrieved context to answer the user's question accurately
 2. Cite your sources using [1], [2], etc. format
@@ -27,14 +27,14 @@ Always prioritize accuracy over confidence. If uncertain, express that uncertain
 """
 
 
-class GraphRagAgent(BaseAgent):
-    """Queries GenAISystem for knowledge-graph-enriched RAG responses."""
+class RagAgent(BaseAgent):
+    """Queries GenAISystem for vector-based RAG responses."""
 
     def __init__(self):
         super().__init__(
             config=AgentConfig(
-                name="GraphRagAgent",
-                description="Answers domain queries using hybrid vector + graph retrieval",
+                name="RagAgent",
+                description="Answers queries using vector document retrieval",
                 temperature=0.1,
             )
         )
@@ -42,15 +42,15 @@ class GraphRagAgent(BaseAgent):
 
     @property
     def system_prompt(self) -> str:
-        return _GRAPH_RAG_SYSTEM_PROMPT
+        return _RAG_SYSTEM_PROMPT
 
-    async def _query_genai_system(self, query: str, strategy: str = "hybrid") -> dict:
-        """Call GenAISystem RAG API to retrieve context."""
+    async def _query_genai_system(self, query: str) -> dict:
+        """Call GenAISystem RAG API to retrieve context using vector search."""
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     f"{self._genai_url}/query",
-                    json={"query": query, "strategy": "graph", "top_k": 5},
+                    json={"query": query, "strategy": "vector", "top_k": 5},
                 )
                 response.raise_for_status()
                 return response.json()
@@ -69,7 +69,7 @@ class GraphRagAgent(BaseAgent):
         if not user_query:
             return {**state, "task_status": "error", "error": "No user query found"}
 
-        logger.info(f"GraphRagAgent: querying GenAISystem for: {user_query!r}")
+        logger.info(f"RagAgent: querying GenAISystem for: {user_query!r}")
 
         # Retrieve context from GenAISystem
         retrieval = await self._query_genai_system(user_query)
@@ -101,7 +101,7 @@ class GraphRagAgent(BaseAgent):
                 **state,
                 "messages": [AIMessage(content=answer)],
                 "task_status": "done",
-                "current_agent": "graph_rag",
+                "current_agent": "rag",
                 "metadata": {
                     **state.get("metadata", {}),
                     "citations": citations,
@@ -109,5 +109,5 @@ class GraphRagAgent(BaseAgent):
                 },
             }
         except Exception as e:
-            logger.error(f"GraphRagAgent generation failed: {e}")
+            logger.error(f"RagAgent generation failed: {e}")
             return {**state, "task_status": "error", "error": str(e)}

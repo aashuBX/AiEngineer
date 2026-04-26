@@ -4,8 +4,10 @@ Provides /ingest and /query endpoints.
 """
 
 import logging
+import tempfile
+import shutil
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 
 from src.config.settings import settings
@@ -114,31 +116,68 @@ class IngestRequest(BaseModel):
 @app.post("/query")
 async def retrieve_and_generate(req: QueryRequest):
     """
-    RAG Query endpoint. Returns context documents only if AiAgents GraphRag needs them,
-    or generates a final answer if used standalone.
+    RAG Query endpoint.
+    strategy:
+      - "vector"  → Pinecone similarity search only (RagAgent)
+      - "graph"   → Neo4j knowledge graph only (GraphRagAgent)
+      - "hybrid"  → Both combined
     """
     try:
-        # 1. Retrieve
-        docs = hybrid_retriever.async_retrieve(
-            req.query, 
-            top_k=req.top_k, 
-            rerank_strategy=req.rerank_strategy
-        )
-        
-        # Format docs for the orchestration Agent (GraphRagAgent)
+        docs = []
+
+        if req.strategy in ("vector", "hybrid"):
+            # Pinecone vector similarity search
+            try:
+                vector_docs = vector_store.similarity_search(req.query, k=req.top_k)
+                docs.extend(vector_docs)
+                logger.info(f"Vector search returned {len(vector_docs)} docs")
+            except Exception as e:
+                logger.error(f"Vector search failed: {e}")
+
+        if req.strategy in ("graph", "hybrid"):
+            # Neo4j knowledge graph search
+            try:
+                from langchain_neo4j import Neo4jGraph, GraphCypherQAChain
+                from langchain_core.documents import Document
+                graph = Neo4jGraph(
+                    url=settings.neo4j_uri,
+                    username=settings.neo4j_username,
+                    password=settings.neo4j_password,
+                )
+                chain = GraphCypherQAChain.from_llm(
+                    _create_llm(), graph=graph, verbose=False, return_direct=True
+                )
+                graph_res = chain.invoke({"query": req.query})
+                raw = graph_res.get("result", "")
+                if raw:
+                    docs.append(Document(page_content=str(raw), metadata={"source": "Neo4j"}))
+                    logger.info("Graph search returned 1 result")
+            except Exception as e:
+                logger.error(f"Graph search failed: {e}")
+
+        # Rerank if hybrid or multiple docs
+        if req.strategy == "hybrid" and docs:
+            docs = hybrid_retriever.async_retrieve(
+                req.query, top_k=req.top_k, rerank_strategy=req.rerank_strategy
+            )
+        else:
+            docs = docs[:req.top_k]
+
+        # Format for the calling agent
         formatted_docs = [
             {"content": d.page_content, "metadata": d.metadata}
             for d in docs
         ]
-        
-        # We also generate a direct answer here just in case caller wants it directly
+
+        # Generate a direct answer
         gen_res = await response_generator.generate_answer(req.query, docs)
-        
+
         return {
             "query": req.query,
+            "strategy": req.strategy,
             "answer": gen_res.get("answer"),
             "documents": formatted_docs,
-            "citations": gen_res.get("citations")
+            "citations": gen_res.get("citations"),
         }
     except Exception as e:
         logger.error(f"Query endpoint error: {e}")
@@ -168,6 +207,45 @@ def trigger_ingestion(req: IngestRequest):
     except Exception as e:
         logger.error(f"Ingest endpoint error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ingest/documents")
+async def ingest_document(file: UploadFile = File(...), collection: str = "default"):
+    """
+    Accept a file upload, save it temporarily, and run the ingestion pipeline.
+    This is the endpoint proxied by AiAgents /upload.
+    """
+    import uuid
+    from src.ingestion.pipeline import IngestionPipeline
+    from src.embeddings.factory import get_embeddings
+
+    suffix = "." + file.filename.rsplit(".", 1)[-1] if "." in file.filename else ""
+    tmp_dir = tempfile.mkdtemp()
+    tmp_path = f"{tmp_dir}/{file.filename}"
+
+    try:
+        contents = await file.read()
+        with open(tmp_path, "wb") as f:
+            f.write(contents)
+
+        pipeline = IngestionPipeline(
+            vector_store=vector_store,
+            knowledge_graph=kg_builder,
+            embedder=get_embeddings(),
+        )
+        stats = pipeline.run_directory_ingestion(directory=tmp_dir)
+
+        return {
+            "job_id": str(uuid.uuid4()),
+            "filename": file.filename,
+            "status": "ingested",
+            "stats": stats,
+        }
+    except Exception as e:
+        logger.error(f"Document ingest error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 @app.get("/health")

@@ -1,5 +1,5 @@
 """
-Vector Store Factory — provides FAISS (local) or Qdrant (production).
+Vector Store Factory — provides FAISS (local), Qdrant, or Pinecone (production).
 """
 
 import os
@@ -57,6 +57,16 @@ def get_vector_store() -> VectorStore:
             client=client,
             collection_name="genai_documents",
             embedding=embeddings,
+        )
+
+    elif provider == "pinecone":
+        from langchain_pinecone import PineconeVectorStore
+
+        logger.info(f"Connecting to Pinecone index: {settings.pinecone_index_name}")
+        return PineconeVectorStore(
+            index_name=settings.pinecone_index_name,
+            embedding=embeddings,
+            pinecone_api_key=settings.pinecone_api_key,
         )
 
     else:
