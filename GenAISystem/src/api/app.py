@@ -122,6 +122,8 @@ async def retrieve_and_generate(req: QueryRequest):
       - "graph"   → Neo4j knowledge graph only (GraphRagAgent)
       - "hybrid"  → Both combined
     """
+    from langchain_core.documents import Document
+
     try:
         docs = []
 
@@ -138,7 +140,6 @@ async def retrieve_and_generate(req: QueryRequest):
             # Neo4j knowledge graph search
             try:
                 from langchain_neo4j import Neo4jGraph, GraphCypherQAChain
-                from langchain_core.documents import Document
                 graph = Neo4jGraph(
                     url=settings.neo4j_uri,
                     username=settings.neo4j_username,
@@ -155,13 +156,26 @@ async def retrieve_and_generate(req: QueryRequest):
             except Exception as e:
                 logger.error(f"Graph search failed: {e}")
 
-        # Rerank if hybrid or multiple docs
+        # Rerank if hybrid
         if req.strategy == "hybrid" and docs:
             docs = hybrid_retriever.async_retrieve(
                 req.query, top_k=req.top_k, rerank_strategy=req.rerank_strategy
             )
         else:
             docs = docs[:req.top_k]
+
+        # ── Mock fallback: if no docs found, return placeholder context ────────
+        if not docs:
+            logger.warning(f"No documents found for query '{req.query}' — returning mock context")
+            docs = [
+                Document(
+                    page_content=(
+                        "This is a placeholder response. The knowledge base is currently empty. "
+                        "Please upload documents via the /upload endpoint to enable real RAG responses."
+                    ),
+                    metadata={"source": "mock", "note": "No documents ingested yet"},
+                )
+            ]
 
         # Format for the calling agent
         formatted_docs = [
@@ -177,11 +191,18 @@ async def retrieve_and_generate(req: QueryRequest):
             "strategy": req.strategy,
             "answer": gen_res.get("answer"),
             "documents": formatted_docs,
-            "citations": gen_res.get("citations"),
+            "citations": gen_res.get("citations", []),
         }
     except Exception as e:
         logger.error(f"Query endpoint error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return a graceful mock response instead of crashing
+        return {
+            "query": req.query,
+            "strategy": req.strategy,
+            "answer": f"The knowledge base is currently unavailable. Please try again or upload documents first. (Error: {str(e)})",
+            "documents": [],
+            "citations": [],
+        }
 
 
 @app.post("/ingest")

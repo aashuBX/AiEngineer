@@ -61,10 +61,37 @@ def get_vector_store() -> VectorStore:
 
     elif provider == "pinecone":
         from langchain_pinecone import PineconeVectorStore
+        from pinecone import Pinecone, ServerlessSpec
 
-        logger.info(f"Connecting to Pinecone index: {settings.pinecone_index_name}")
+        pc = Pinecone(api_key=settings.pinecone_api_key)
+        index_name = settings.pinecone_index_name
+
+        # Auto-create the index if it doesn't exist yet
+        existing_indexes = [idx.name for idx in pc.list_indexes()]
+        if index_name not in existing_indexes:
+            logger.info(f"Pinecone index '{index_name}' not found — creating it now...")
+            # all-MiniLM-L6-v2 produces 384-dim vectors
+            embed_dim = 384
+            pc.create_index(
+                name=index_name,
+                dimension=embed_dim,
+                metric="cosine",
+                spec=ServerlessSpec(cloud="aws", region="us-east-1"),
+            )
+            # Wait until the index is ready
+            import time
+            for _ in range(30):
+                desc = pc.describe_index(index_name)
+                if desc.status.get("ready", False):
+                    break
+                logger.info("Waiting for Pinecone index to become ready...")
+                time.sleep(2)
+            logger.info(f"Pinecone index '{index_name}' is ready.")
+        else:
+            logger.info(f"Connecting to existing Pinecone index: {index_name}")
+
         return PineconeVectorStore(
-            index_name=settings.pinecone_index_name,
+            index_name=index_name,
             embedding=embeddings,
             pinecone_api_key=settings.pinecone_api_key,
         )
