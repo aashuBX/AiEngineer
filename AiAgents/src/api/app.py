@@ -67,6 +67,7 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    architecture: Optional[str] = "supervisor"
 
 
 class ChatResponse(BaseModel):
@@ -120,6 +121,7 @@ async def chat(req: ChatRequest):
         from src.agents.rag.rag_agent import RagAgent
         from src.agents.graph_rag.graph_rag_agent import GraphRagAgent
         from src.graphs.multi_agent_graph import build_supervisor_graph
+        from src.graphs.multi_agent_react_graph import build_multi_agent_react_graph
 
         tools = getattr(app.state, "mcp_tools", [])
 
@@ -170,8 +172,13 @@ async def chat(req: ChatRequest):
             "graph_rag_agent": graph_rag.process,
         }
 
-        # ── Run the LangGraph Supervisor pipeline ──────────────────────────
-        graph = build_supervisor_graph(worker_nodes)
+        # ── Run the Multi-Agent pipeline ──────────────────────────
+        if req.architecture == "react":
+            logger.info(f"[{session_id}] Using Multi-Agent ReAct architecture")
+            graph = build_multi_agent_react_graph(worker_nodes)
+        else:
+            logger.info(f"[{session_id}] Using Supervisor architecture")
+            graph = build_supervisor_graph(worker_nodes)
         initial_state = {
             "messages": [HumanMessage(content=req.message)],
             "session_id": session_id,
