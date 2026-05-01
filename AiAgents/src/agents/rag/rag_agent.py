@@ -44,13 +44,18 @@ class RagAgent(BaseAgent):
     def system_prompt(self) -> str:
         return _RAG_SYSTEM_PROMPT
 
-    async def _query_genai_system(self, query: str) -> dict:
-        """Call GenAISystem RAG API to retrieve context using vector search."""
+    async def _query_genai_system(self, query: str, strategy: str) -> dict:
+        """Call GenAISystem RAG API to retrieve context using the chosen strategy."""
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     f"{self._genai_url}/query",
-                    json={"query": query, "strategy": "vector", "top_k": 5},
+                    json={
+                        "query": query,
+                        "strategy": strategy,
+                        "rerank_strategy": "auto",
+                        "top_k": 5
+                    },
                 )
                 response.raise_for_status()
                 return response.json()
@@ -69,10 +74,19 @@ class RagAgent(BaseAgent):
         if not user_query:
             return {**state, "task_status": "error", "error": "No user query found"}
 
-        logger.info(f"RagAgent: querying GenAISystem for: {user_query!r}")
+        # Zero-cost heuristic for intelligent routing
+        words = user_query.split()
+        if len(words) <= 5:
+            strategy = "keyword"
+            logger.info(f"RagAgent: Query is short ({len(words)} words), auto-routing to 'keyword' strategy.")
+        else:
+            strategy = "hybrid"
+            logger.info(f"RagAgent: Query is natural language, auto-routing to 'hybrid' strategy.")
+
+        logger.info(f"RagAgent: querying GenAISystem for: {user_query!r} with strategy: {strategy}")
 
         # Retrieve context from GenAISystem
-        retrieval = await self._query_genai_system(user_query)
+        retrieval = await self._query_genai_system(user_query, strategy)
         documents = retrieval.get("documents", [])
         citations = retrieval.get("citations", [])
         backend_answer = retrieval.get("answer")
