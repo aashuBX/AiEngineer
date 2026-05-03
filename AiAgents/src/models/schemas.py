@@ -8,6 +8,7 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
+from typing import List
 
 
 # ── Enumerations ───────────────────────────────────────────────────────────────
@@ -33,6 +34,14 @@ class GuardrailDecision(str, Enum):
     ALLOW = "allow"
     BLOCK = "block"
     SANITIZE = "sanitize"
+    RETRY = "retry"   # Triggers hallucination recovery re-generation
+
+
+class HallucinationVerdict(str, Enum):
+    """Verdict from the post-generation hallucination detection cascade."""
+    FAITHFUL = "faithful"             # All claims grounded in context
+    HALLUCINATED = "hallucinated"     # Clear fabrication detected
+    PARTIALLY_FAITHFUL = "partially_faithful"  # Some claims unsupported
 
 
 # ── Core Models ────────────────────────────────────────────────────────────────
@@ -93,6 +102,29 @@ class GuardrailResult(BaseModel):
     reason: Optional[str] = None
     sanitized_content: Optional[str] = None
     detected_issues: list[str] = Field(default_factory=list)
+
+
+class HallucinationResult(BaseModel):
+    """Structured result from the tiered hallucination detection cascade."""
+
+    verdict: HallucinationVerdict
+    risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    # Tier 1 — Semantic similarity grounding
+    semantic_similarity: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+    # Tier 2 — LLM-as-a-Judge
+    llm_judge_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    unsupported_claims: List[str] = Field(default_factory=list)
+
+    # Tier 3 — Claim decomposition
+    total_claims: Optional[int] = None
+    supported_claims: Optional[int] = None
+
+    # Audit trail
+    detection_tiers_run: List[str] = Field(default_factory=list)
+    retry_suggested: bool = False   # True → recovery should attempt re-generation
+    error: Optional[str] = None     # Set if a detection tier itself failed
 
 
 class HandoffRequest(BaseModel):

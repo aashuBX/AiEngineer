@@ -38,6 +38,11 @@ class AgentState(TypedDict):
     error: Optional[str]                  # Error message if task_status == "error"
     session_id: str                        # Unique thread/conversation ID
 
+    # Hallucination detection & recovery
+    retrieved_context: Optional[str]       # Raw retrieval context for grounding checks
+    hallucination_attempts: int            # Number of re-generation attempts so far
+    hallucination_result: Optional[dict]   # Last HallucinationResult (serialised)
+
 
 # ── Supervisor State ───────────────────────────────────────────────────────────
 class SupervisorState(AgentState):

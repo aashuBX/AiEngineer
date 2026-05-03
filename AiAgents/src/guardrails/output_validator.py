@@ -40,11 +40,13 @@ def check_toxicity(text: str) -> list[str]:
     return found
 
 
-def check_hallucination_risk(text: str, context: str = "") -> dict[str, Any]:
+def check_hallucination_risk_sync(text: str, context: str = "") -> dict[str, Any]:
     """
-    Estimate hallucination risk:
-    - Detects explicit uncertainty markers
-    - If context provided, checks that key claims appear in context
+    Lightweight synchronous hallucination risk estimate.
+
+    Fast regex + lexical fallback. For full semantic accuracy, use the async cascade:
+      from src.guardrails.hallucination_detector import run_hallucination_cascade
+      result = await run_hallucination_cascade(answer, context, config)
     """
     indicators = [p.pattern for p in HALLUCINATION_INDICATORS if p.search(text)]
     overconfident = [p.pattern for p in OVERCONFIDENCE if p.search(text)]
@@ -55,7 +57,7 @@ def check_hallucination_risk(text: str, context: str = "") -> dict[str, Any]:
     if overconfident:
         risk_score += 0.4
 
-    # Simple grounding check: count content words in text that also appear in context
+    # Lexical grounding check: word overlap
     if context:
         text_words = set(re.findall(r"\b\w{5,}\b", text.lower()))
         ctx_words = set(re.findall(r"\b\w{5,}\b", context.lower()))
@@ -72,6 +74,10 @@ def check_hallucination_risk(text: str, context: str = "") -> dict[str, Any]:
     }
 
 
+# Backward-compatibility alias
+check_hallucination_risk = check_hallucination_risk_sync
+
+
 def validate_output(
     text: str,
     context: str = "",
@@ -79,20 +85,23 @@ def validate_output(
     block_high_hallucination: bool = False,
 ) -> GuardrailResult:
     """
-    Full output validation pipeline.
+    Synchronous output validation pipeline (toxicity + lexical hallucination risk).
+
+    For deep semantic hallucination detection with recovery, the async pipeline in
+    app.py calls run_hallucination_cascade() + recover_from_hallucination() directly.
 
     Args:
-        text:                   Generated LLM response text.
-        context:                Retrieved context (for grounding check).
-        block_toxic:            If True, block toxic responses.
-        block_high_hallucination: If True, block responses with high hallucination risk.
+        text:                     Generated LLM response text.
+        context:                  Retrieved context (for grounding check).
+        block_toxic:              Block toxic responses.
+        block_high_hallucination: Signal RETRY (not hard BLOCK) for high-risk responses.
 
     Returns:
-        GuardrailResult.
+        GuardrailResult with decision ALLOW | SANITIZE | BLOCK | RETRY.
     """
     issues = []
 
-    # Toxicity check
+    # ── Toxicity check ─────────────────────────────────────────────────────
     toxic = check_toxicity(text)
     if toxic and block_toxic:
         logger.warning(f"OutputValidator: toxic content detected: {toxic}")
@@ -104,12 +113,12 @@ def validate_output(
     if toxic:
         issues.extend(toxic)
 
-    # Hallucination risk check
-    hallucination = check_hallucination_risk(text, context)
+    # ── Lexical hallucination risk check ───────────────────────────────────
+    hallucination = check_hallucination_risk_sync(text, context)
     if hallucination["is_high_risk"] and block_high_hallucination:
         logger.warning(f"OutputValidator: high hallucination risk: {hallucination['risk_score']}")
         return GuardrailResult(
-            decision=GuardrailDecision.BLOCK,
+            decision=GuardrailDecision.RETRY,   # Trigger recovery, not hard block
             reason=f"High hallucination risk (score={hallucination['risk_score']})",
             detected_issues=["hallucination_risk"],
         )
